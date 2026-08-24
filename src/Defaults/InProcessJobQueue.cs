@@ -16,7 +16,7 @@ public class InProcessJobQueue : IJobQueue
 
     private bool _jobQueueStarted;
 
-    public string? JobQueueName => _jobQueueOptions.JobQueueName;
+    public string JobQueueName => _jobQueueOptions.JobQueueName;
     public JobQueueOptions JobQueueOptions => _jobQueueOptions;
 
     public InProcessJobQueue(
@@ -167,9 +167,14 @@ public class InProcessJobQueue : IJobQueue
         //
         _logger.LogTrace("[{consumerName}] Handling job schedule {candidateJobScheduleId}, scheduled at {candidateNextJobScheduleAt}", consumerName, candidateJobSchedule?.JobScheduleId, candidateJobSchedule?.NextAt.ToLongTimeString());
 
-        // remove from schedules queue
+        // remove from schedules queue - the candidate is already in hand, no need to re-scan the
+        // list by predicate the way RemoveJobSchedulesAsync does
         if (candidateJobSchedule is not null)
-            await RemoveJobSchedulesAsync(c => c.JobScheduleId == candidateJobSchedule?.JobScheduleId, cancellationToken);
+        {
+            await _scheduleJobSemaphore.WaitAsync(cancellationToken);
+            _jobSchedules.Remove(candidateJobSchedule);
+            _scheduleJobSemaphore.Release();
+        }
 
         // release lock
         _awaitJobSemaphore.Release();

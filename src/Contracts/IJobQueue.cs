@@ -5,8 +5,8 @@ namespace LoomKit.Jobs.Contracts;
 
 public interface IJobQueue
 {
-    public string? JobQueueName { get; }
-    public JobQueueOptions? JobQueueOptions { get; }
+    public string JobQueueName { get; }
+    public JobQueueOptions JobQueueOptions { get; }
 
     Task StartAsync(CancellationToken cancellationToken = default);
     Task StopAsync(CancellationToken cancellationToken = default);

@@ -13,13 +13,13 @@ public interface IJobScheduler : IHostedService
     Task EnqueueJobScheduleAsync(string queueName, JobSchedule jobSchedule, CancellationToken cancellationToken = default);
 
     Task<Dictionary<string, List<JobSchedule>>> ListQueuedJobSchedulesAsync(Func<IQueryable<JobSchedule>, IQueryable<JobSchedule>> queryBuilder, CancellationToken cancellationToken);
-    Task<Dictionary<string, List<JobSchedule>>> ListQueuedJobSchedulesAsync(string queueName, Func<IQueryable<JobSchedule>, IQueryable<JobSchedule>> queryBuilder, CancellationToken cancellationToken);
+    Task<List<JobSchedule>> ListQueuedJobSchedulesAsync(string queueName, Func<IQueryable<JobSchedule>, IQueryable<JobSchedule>> queryBuilder, CancellationToken cancellationToken);
 
-    Task<JobQueueOptions?> GetJobQueueOptionsAsync(string queueName, CancellationToken cancellationToken = default);
-    Task<JobConsumerOptions?> GetJobConsumerOptionsAsync(string consumerName, CancellationToken cancellationToken = default);
+    Task<JobQueueOptions> GetJobQueueOptionsAsync(string queueName, CancellationToken cancellationToken = default);
+    Task<JobConsumerOptions> GetJobConsumerOptionsAsync(string consumerName, CancellationToken cancellationToken = default);
 
     Task<Dictionary<string, long>> RemoveQueuedJobSchedulesAsync(Predicate<JobSchedule> predicate, CancellationToken cancellationToken = default);
-    Task<Dictionary<string, long>> RemoveQueuedJobSchedulesAsync(string queueName, Predicate<JobSchedule> predicate, CancellationToken cancellationToken = default);
+    Task<long> RemoveQueuedJobSchedulesAsync(string queueName, Predicate<JobSchedule> predicate, CancellationToken cancellationToken = default);
 
     Task<List<JobSchedule>> ListConsumingJobSchedulesAsync(CancellationToken cancellationToken = default);
 

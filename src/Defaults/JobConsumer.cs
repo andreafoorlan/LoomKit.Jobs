@@ -25,10 +25,10 @@ public class JobConsumer : IJobConsumer
     private static readonly ConcurrentDictionary<Type, MethodInfo> _innerJobHandleAsyncMethodCache = new();
     private static readonly ConcurrentDictionary<(JobConsumerOptions Options, Type JobType), JobDispatchPlan> _dispatchPlanCache = new();
 
-    public string? JobConsumerName => _jobConsumerOptions.JobConsumerName;
-    public string? JobQueueName => _jobConsumerOptions.JobQueueName;
-    public JobConsumerOptions? JobConsumerOptions => _jobConsumerOptions;
-    public bool? IsStarted => _consumerTask is not null && !_consumerTask.IsCompleted;
+    public string JobConsumerName => _jobConsumerOptions.JobConsumerName;
+    public string JobQueueName => _jobConsumerOptions.JobQueueName;
+    public JobConsumerOptions JobConsumerOptions => _jobConsumerOptions;
+    public bool IsStarted => _consumerTask is not null && !_consumerTask.IsCompleted;
 
     public JobSchedule? CurrentJobSchedule => _currentJobSchedule;
 
@@ -226,7 +226,9 @@ public class JobConsumer : IJobConsumer
         // get job type
         var jobType = typeof(TJob);
 
-        // get (or build once) the plan describing which handler/middleware types to close and how to construct them
+        // get (or build once) the plan describing which handler/middleware types to close, how to
+        // construct them, and the activity name for this job type (also constant per type, so it's
+        // computed once here instead of interpolating a new string on every single dispatch)
         var plan = _dispatchPlanCache.GetOrAdd((_jobConsumerOptions, jobType), static key =>
         {
             var (options, type) = key;
@@ -239,7 +241,7 @@ public class JobConsumer : IJobConsumer
                 .Select(middlewareType => ActivatorUtilities.CreateFactory(middlewareType.MakeGenericType(type, jobStatusType), [handlerType]))
                 .ToArray();
 
-            return new JobDispatchPlan(handlerType, middlewareFactories);
+            return new JobDispatchPlan(handlerType, middlewareFactories, $"job.execute {type.Name}");
         });
 
         // get job handler
@@ -248,7 +250,7 @@ public class JobConsumer : IJobConsumer
         // create the middleware pipeline from the cached factories
         var currentJobHandler = jobHandlerClosedInstance;
 
-        using var activity = JobsActivitySource.Source.StartActivity($"job.execute {jobType.Name}", ActivityKind.Internal);
+        using var activity = JobsActivitySource.Source.StartActivity(plan.ActivityName, ActivityKind.Internal);
         activity?.SetTag("job.type", jobType.FullName);
         activity?.SetTag("job.status_type", typeof(TJobStatus).FullName);
         activity?.SetTag("job.schedule_id", jobSchedule.JobScheduleId);
@@ -268,11 +270,25 @@ public class JobConsumer : IJobConsumer
         }
         catch (Exception ex)
         {
-            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            activity?.AddException(ex);
+            RecordException(activity, ex);
             throw;
         }
     }
 
-    private sealed record JobDispatchPlan(Type HandlerType, ObjectFactory[] MiddlewareFactories);
+    // Records the exception on the Activity using the framework's own OpenTelemetry-conformant
+    // helper instead of hand-building tags. Note for consumers: this attaches the full exception
+    // (including its Message and stack trace) to the Activity, so it will flow to whatever
+    // tracing backend/exporter is configured - avoid throwing exceptions that carry secrets or
+    // PII in their Message from job handlers if that telemetry pipeline isn't access-controlled
+    // the same way your application logs are.
+    private static void RecordException(Activity? activity, Exception exception)
+    {
+        if (activity is null)
+            return;
+
+        activity.SetStatus(ActivityStatusCode.Error, exception.Message);
+        activity.AddException(exception);
+    }
+
+    private sealed record JobDispatchPlan(Type HandlerType, ObjectFactory[] MiddlewareFactories, string ActivityName);
 }

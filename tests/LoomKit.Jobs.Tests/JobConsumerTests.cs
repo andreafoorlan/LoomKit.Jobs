@@ -16,20 +16,15 @@ public class JobConsumerTests
     {
         using var provider = TestServiceProviderFactory.Build();
         var scheduler = provider.GetRequiredService<IJobScheduler>();
-        await scheduler.StartAsync(CancellationToken.None);
 
-        try
+        await SchedulerTestHarness.RunAsync(scheduler, async () =>
         {
             var job = new PingJob();
             await scheduler.ScheduleNowAsync(TestServiceProviderFactory.QueueName, job);
 
             Assert.True(await Wait.UntilAsync(() => job.Trace.Count > 0, TimeSpan.FromSeconds(2)));
             Assert.Equal(["handler"], job.Trace);
-        }
-        finally
-        {
-            await scheduler.StopAsync(CancellationToken.None);
-        }
+        });
     }
 
     [Fact]
@@ -39,9 +34,8 @@ public class JobConsumerTests
             .UseJobMiddleware(typeof(FirstMiddleware<,>))
             .UseJobMiddleware(typeof(SecondMiddleware<,>)));
         var scheduler = provider.GetRequiredService<IJobScheduler>();
-        await scheduler.StartAsync(CancellationToken.None);
 
-        try
+        await SchedulerTestHarness.RunAsync(scheduler, async () =>
         {
             var job = new PingJob();
             await scheduler.ScheduleNowAsync(TestServiceProviderFactory.QueueName, job);
@@ -50,11 +44,7 @@ public class JobConsumerTests
             Assert.Equal(
                 ["first:before", "second:before", "handler", "second:after", "first:after"],
                 job.Trace);
-        }
-        finally
-        {
-            await scheduler.StopAsync(CancellationToken.None);
-        }
+        });
     }
 
     [Fact]
@@ -64,9 +54,8 @@ public class JobConsumerTests
         // the response used to be computed by the pipeline and then silently thrown away
         using var provider = TestServiceProviderFactory.Build();
         var scheduler = provider.GetRequiredService<IJobScheduler>();
-        await scheduler.StartAsync(CancellationToken.None);
 
-        try
+        await SchedulerTestHarness.RunAsync(scheduler, async () =>
         {
             var job = new TraceJob();
             JobEndedEventArgs? ended = null;
@@ -79,11 +68,7 @@ public class JobConsumerTests
             var typedStatus = Assert.IsType<JobStatus<List<string>>>(ended!.JobSchedule.JobStatus);
             Assert.Same(job.Trace, typedStatus.JobResponse);
             Assert.Equal(["handler"], typedStatus.JobResponse);
-        }
-        finally
-        {
-            await scheduler.StopAsync(CancellationToken.None);
-        }
+        });
     }
 
     [Fact]
@@ -91,9 +76,8 @@ public class JobConsumerTests
     {
         using var provider = TestServiceProviderFactory.Build(c => c.UseJobMiddleware(typeof(FirstMiddleware<,>)));
         var scheduler = provider.GetRequiredService<IJobScheduler>();
-        await scheduler.StartAsync(CancellationToken.None);
 
-        try
+        await SchedulerTestHarness.RunAsync(scheduler, async () =>
         {
             var first = new PingJob();
             var second = new PingJob();
@@ -105,11 +89,7 @@ public class JobConsumerTests
 
             Assert.Equal(["first:before", "handler", "first:after"], first.Trace);
             Assert.Equal(["first:before", "handler", "first:after"], second.Trace);
-        }
-        finally
-        {
-            await scheduler.StopAsync(CancellationToken.None);
-        }
+        });
     }
 
     [Fact]
@@ -117,20 +97,15 @@ public class JobConsumerTests
     {
         using var provider = TestServiceProviderFactory.Build(c => c.UseJobMiddleware(typeof(JobRetryMiddleware<,>)));
         var scheduler = provider.GetRequiredService<IJobScheduler>();
-        await scheduler.StartAsync(CancellationToken.None);
 
-        try
+        await SchedulerTestHarness.RunAsync(scheduler, async () =>
         {
             var job = new RetryingJob { FailUntilAttempt = 3 };
             await scheduler.ScheduleNowAsync(TestServiceProviderFactory.QueueName, job);
 
             Assert.True(await Wait.UntilAsync(() => job.Trace.Count >= 3, TimeSpan.FromSeconds(3)));
             Assert.Equal(["attempt:1", "attempt:2", "attempt:3"], job.Trace);
-        }
-        finally
-        {
-            await scheduler.StopAsync(CancellationToken.None);
-        }
+        });
     }
 
     [Fact]
@@ -138,7 +113,8 @@ public class JobConsumerTests
     {
         // regression test: InProcessJobQueue.AwaitForJobScheduleAsync used to not pass the
         // cancellation token into its polling Task.Delay, so shutdown had to wait out a full
-        // JobAwaitCheckInterval before observing cancellation
+        // JobAwaitCheckInterval before observing cancellation. Doesn't use SchedulerTestHarness
+        // since StopAsync's timing is exactly what's under test here.
         using var provider = TestServiceProviderFactory.Build(configureQueue: q => q.JobAwaitCheckInterval = 5000);
         var scheduler = provider.GetRequiredService<IJobScheduler>();
         await scheduler.StartAsync(CancellationToken.None);

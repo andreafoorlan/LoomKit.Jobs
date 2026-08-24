@@ -10,21 +10,17 @@ public static class JobSchedulerExtensions
     public static async Task ScheduleNowAsync<TJob>(this IJobScheduler jobScheduler, string queueName, TJob job, string? jobScheduleId = null, string? jobGroupId = null, CancellationToken cancellationToken = default)
         where TJob : IJob
     {
-        // get job queue options
-        var jobQueueOptions = await jobScheduler.GetJobQueueOptionsAsync(queueName, cancellationToken);
+        var (id, groupId, jobStatus, retriesLeft) = await PrepareJobScheduleAsync<TJob>(jobScheduler, queueName, jobScheduleId, jobGroupId, cancellationToken);
 
-        // build job schedule - a fresh, correctly-typed JobStatus for this job's TJobStatus,
-        // resolved reflectively since this method only knows TJob at compile time (see
-        // JobStatusTypeResolver for why: keeping ergonomics at ScheduleNowAsync<TJob>(...) instead
-        // of requiring callers to also spell out TJobStatus)
+        // build job schedule
         var jobSchedule = new JobSchedule()
         {
-            JobScheduleId = jobScheduleId ?? Guid.NewGuid().ToString(),
-            JobGroupId = jobGroupId ?? Guid.NewGuid().ToString(),
+            JobScheduleId = id,
+            JobGroupId = groupId,
             Job = job,
-            JobStatus = JobStatusTypeResolver.CreateJobStatus(typeof(TJob)),
+            JobStatus = jobStatus,
             NextAt = DateTime.UtcNow,
-            RetriesLeft = jobQueueOptions?.MaxJobRetries ?? throw new InvalidDataException(nameof(jobQueueOptions))
+            RetriesLeft = retriesLeft
         };
 
         // enqueue
@@ -34,18 +30,17 @@ public static class JobSchedulerExtensions
     public static async Task ScheduleAtAsync<TJob>(this IJobScheduler jobScheduler, string queueName, DateTime at, TJob job, string? jobScheduleId = null, string? jobGroupId = null, CancellationToken cancellationToken = default)
         where TJob : IJob
     {
-        // get job queue options
-        var jobQueueOptions = await jobScheduler.GetJobQueueOptionsAsync(queueName, cancellationToken);
+        var (id, groupId, jobStatus, retriesLeft) = await PrepareJobScheduleAsync<TJob>(jobScheduler, queueName, jobScheduleId, jobGroupId, cancellationToken);
 
         // build job schedule
         var jobSchedule = new JobSchedule()
         {
-            JobScheduleId = jobScheduleId ?? Guid.NewGuid().ToString(),
-            JobGroupId = jobGroupId ?? Guid.NewGuid().ToString(),
+            JobScheduleId = id,
+            JobGroupId = groupId,
             Job = job,
-            JobStatus = JobStatusTypeResolver.CreateJobStatus(typeof(TJob)),
+            JobStatus = jobStatus,
             NextAt = at,
-            RetriesLeft = jobQueueOptions?.MaxJobRetries ?? throw new InvalidDataException(nameof(jobQueueOptions))
+            RetriesLeft = retriesLeft
         };
 
         // enqueue
@@ -55,31 +50,47 @@ public static class JobSchedulerExtensions
     public static async Task ScheduleCronAsync<TJob>(this IJobScheduler jobScheduler, string queueName, string cronExpression, DateTime? cronStartAt, DateTime? cronEndAt, TJob job, string? jobScheduleId = null, string? jobGroupId = null, CancellationToken cancellationToken = default)
         where TJob : IJob
     {
-        // get job queue options
-        var jobQueueOptions = await jobScheduler.GetJobQueueOptionsAsync(queueName, cancellationToken);
-
-        // calculate next at
+        // calculate next at first - pure/sync, no reason to prepare a schedule (which does I/O)
+        // for an expression/window that yields no next occurrence
         var calculatedNextAt = CalculateCronNextAt(cronExpression, cronStartAt, cronEndAt);
 
         if (calculatedNextAt is null)
             return;
 
+        var (id, groupId, jobStatus, retriesLeft) = await PrepareJobScheduleAsync<TJob>(jobScheduler, queueName, jobScheduleId, jobGroupId, cancellationToken);
+
         // build job schedule
         var cronJobSchedule = new CronJobSchedule()
         {
-            JobScheduleId = jobScheduleId ?? Guid.NewGuid().ToString(),
-            JobGroupId = jobGroupId ?? Guid.NewGuid().ToString(),
+            JobScheduleId = id,
+            JobGroupId = groupId,
             Job = job,
-            JobStatus = JobStatusTypeResolver.CreateJobStatus(typeof(TJob)),
+            JobStatus = jobStatus,
             CronExpression = cronExpression,
             CronStartAt = cronStartAt,
             CronEndAt = cronEndAt,
-            NextAt = calculatedNextAt.Value!,
-            RetriesLeft = jobQueueOptions?.MaxJobRetries ?? throw new InvalidDataException(nameof(jobQueueOptions))
+            NextAt = calculatedNextAt.Value,
+            RetriesLeft = retriesLeft
         };
 
         // enqueue
         await jobScheduler.EnqueueJobScheduleAsync(queueName, cronJobSchedule, cancellationToken);
+    }
+
+    // Shared plumbing for every Schedule*Async overload above: resolve the queue's retry budget,
+    // fall back to a fresh id/group id when the caller didn't supply one, and build the job's
+    // JobStatus instance with its correct concrete type (see JobStatusTypeResolver).
+    private static async Task<(string JobScheduleId, string JobGroupId, JobStatus JobStatus, int RetriesLeft)> PrepareJobScheduleAsync<TJob>(IJobScheduler jobScheduler, string queueName, string? jobScheduleId, string? jobGroupId, CancellationToken cancellationToken)
+        where TJob : IJob
+    {
+        // GetJobQueueOptionsAsync never returns without a value - it throws if the queue doesn't exist
+        var jobQueueOptions = await jobScheduler.GetJobQueueOptionsAsync(queueName, cancellationToken);
+
+        return (
+            jobScheduleId ?? Guid.NewGuid().ToString(),
+            jobGroupId ?? Guid.NewGuid().ToString(),
+            JobStatusTypeResolver.CreateJobStatus(typeof(TJob)),
+            jobQueueOptions.MaxJobRetries);
     }
 
     private static DateTime? CalculateCronNextAt(string cronExpression, DateTime? cronStartAt, DateTime? cronEndAt)

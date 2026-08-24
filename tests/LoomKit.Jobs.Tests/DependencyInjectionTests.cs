@@ -22,9 +22,8 @@ public class DependencyInjectionTests
 
         using var provider = services.BuildServiceProvider();
         var scheduler = provider.GetRequiredService<IJobScheduler>();
-        await scheduler.StartAsync(CancellationToken.None);
 
-        try
+        await SchedulerTestHarness.RunAsync(scheduler, async () =>
         {
             var job = new PingJob();
             await scheduler.ScheduleNowAsync(TestServiceProviderFactory.QueueName, job);
@@ -33,11 +32,7 @@ public class DependencyInjectionTests
 
             Assert.True(completed);
             Assert.Equal(["handler"], job.Trace);
-        }
-        finally
-        {
-            await scheduler.StopAsync(CancellationToken.None);
-        }
+        });
     }
 
     [Fact]

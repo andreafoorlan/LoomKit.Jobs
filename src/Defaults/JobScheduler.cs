@@ -153,26 +153,17 @@ public class JobScheduler : JobScheduler<DefaultJobSchedulerOptions>
         return allQueuesJobSchedules;
     }
 
-    public override async Task<Dictionary<string, List<JobSchedule>>> ListQueuedJobSchedulesAsync(string queueName, Func<IQueryable<JobSchedule>, IQueryable<JobSchedule>> queryBuilder, CancellationToken cancellationToken)
+    public override async Task<List<JobSchedule>> ListQueuedJobSchedulesAsync(string queueName, Func<IQueryable<JobSchedule>, IQueryable<JobSchedule>> queryBuilder, CancellationToken cancellationToken)
     {
         // try get the queue by name
         if (!_jobQueues.TryGetValue(queueName, out var jobQueue))
             throw new InvalidOperationException($"Queue {queueName} does not exists");
 
         //
-        var listJobSchedules = await jobQueue.ListJobSchedulesAsync(queryBuilder, cancellationToken);
-
-        //
-        var queueJobSchedules = new Dictionary<string, List<JobSchedule>>
-        {
-            { queueName, listJobSchedules }
-        };
-
-        //
-        return queueJobSchedules;
+        return await jobQueue.ListJobSchedulesAsync(queryBuilder, cancellationToken);
     }
 
-    public override Task<JobQueueOptions?> GetJobQueueOptionsAsync(string queueName, CancellationToken cancellationToken = default)
+    public override Task<JobQueueOptions> GetJobQueueOptionsAsync(string queueName, CancellationToken cancellationToken = default)
     {
         // try get the queue by name
         if (!_jobQueues.TryGetValue(queueName, out var jobQueue))
@@ -182,7 +173,7 @@ public class JobScheduler : JobScheduler<DefaultJobSchedulerOptions>
         return Task.FromResult(jobQueue.JobQueueOptions);
     }
 
-    public override Task<JobConsumerOptions?> GetJobConsumerOptionsAsync(string consumerName, CancellationToken cancellationToken = default)
+    public override Task<JobConsumerOptions> GetJobConsumerOptionsAsync(string consumerName, CancellationToken cancellationToken = default)
     {
         // try get the consumer by name
         if (!_jobConsumers.TryGetValue(consumerName, out var jobConsumer))
@@ -211,23 +202,14 @@ public class JobScheduler : JobScheduler<DefaultJobSchedulerOptions>
         return allQueuesRemovedCount;
     }
 
-    public override async Task<Dictionary<string, long>> RemoveQueuedJobSchedulesAsync(string queueName, Predicate<JobSchedule> predicate, CancellationToken cancellationToken = default)
+    public override async Task<long> RemoveQueuedJobSchedulesAsync(string queueName, Predicate<JobSchedule> predicate, CancellationToken cancellationToken = default)
     {
         // try get the queue by name
         if (!_jobQueues.TryGetValue(queueName, out var jobQueue))
             throw new InvalidOperationException($"Queue {queueName} does not exists");
 
         //
-        var queueRemoveJobSchedulesCount = await jobQueue.RemoveJobSchedulesAsync(predicate, cancellationToken);
-
-        //
-        var queueRemovedCount = new Dictionary<string, long>
-        {
-            { queueName, queueRemoveJobSchedulesCount }
-        };
-
-        //
-        return queueRemovedCount;
+        return await jobQueue.RemoveJobSchedulesAsync(predicate, cancellationToken);
     }
 
     public override Task NotifyJobScheduled(string queueName, JobSchedule jobSchedule)
