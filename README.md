@@ -10,6 +10,7 @@ A background job scheduling library for .NET: jobs are placed on named **queues*
 - One-shot (`ScheduleNowAsync`), delayed (`ScheduleAtAsync`), and recurring cron (`ScheduleCronAsync`) scheduling
 - Handlers resolved from your DI container (`Microsoft.Extensions.DependencyInjection`)
 - An optional middleware pipeline per consumer, configured at startup — built-in retry and cron-reschedule middleware included
+- Cron jobs are overlapping-safe by design: `CronJobRescheduleMiddleware<,>` only schedules the next occurrence after the current run finishes, so a slow run delays the next one instead of overlapping it
 - Every job carries a `JobStatus` (progress, timing, and — for jobs that produce one — a typed response) that's visible while the job runs, not only after it finishes
 - Built-in tracing via `System.Diagnostics.ActivitySource` (OpenTelemetry-compatible)
 - Lifecycle events (`JobScheduled`/`JobStarted`/`JobEnded`/`JobException`) on the scheduler
@@ -129,8 +130,7 @@ public sealed class FetchExchangeRateHandler : IJobHandler<FetchExchangeRateJob,
 
     public async Task HandleAsync(FetchExchangeRateJob job, JobSchedule jobSchedule, JobStatus<decimal> jobStatus, CancellationToken cancellationToken = default)
     {
-        // written onto the status as soon as it's known - not returned - see "Why JobStatus<TResponse>
-        // instead of IJob<TResponse>?" below
+        // written onto the status as soon as it's known, rather than returned from HandleAsync
         jobStatus.JobResponse = await _rates.GetRateAsync(job.Currency, cancellationToken);
     }
 }
@@ -253,10 +253,6 @@ c.UseJobMiddleware(typeof(LoggingMiddleware<,>))   // runs 1st, then last
 
 `ClearJobMiddlewares()` resets the pipeline built so far if you need to override it conditionally.
 
-## Why `JobStatus<TResponse>` instead of `IJob<TResponse>`?
-
-`LoomKit.Requests` has `IRequest`/`IRequest<TResponse>`, with the response returned from `HandleAsync`. Jobs deliberately don't mirror that shape. A request is a synchronous call — the caller is still there, awaiting, when the response comes back. A job is not: the caller that scheduled it has long since moved on by the time a consumer picks it up, so "return the response from `HandleAsync`" has nowhere useful to go — the only place a response can live is the job's `JobStatus`, the same place its progress and timing already live. `JobStatus<TResponse>` makes that the actual contract: handlers write the response onto `jobStatus.JobResponse` as soon as they know it (even progressively, for a long-running job), and anything holding the `JobSchedule` — an event handler, a query — can read it at any point, not only after the job finishes.
-
 ## Extensibility: custom queues, consumers, and schedulers
 
 Implement `IJobQueue` and pass the type to `UseQueue<T>`. The constructor receives the queue's `JobQueueOptions` and any other services registered in DI, injected automatically via `ActivatorUtilities`:
@@ -286,6 +282,8 @@ services.AddJobScheduler<MyJobScheduler, MyJobSchedulerOptionsBuilder, MyJobSche
 ```csharp
 c.UseJobMiddleware(typeof(CronJobRescheduleMiddleware<,>));
 ```
+
+**Overlapping-safe by design:** the next occurrence is only computed and enqueued *after* the current run finishes — not on a fixed grid — so two runs of the same recurring job can never overlap. If a run takes longer than the interval between occurrences, the next one simply starts late instead of stacking up behind it. The tradeoff is drift — a slow run pushes every following occurrence back by roughly the same amount, since each next occurrence is computed from the actual completion time, not from the original schedule.
 
 To enqueue jobs once at startup (e.g. to (re-)establish a recurring cron job when the app boots), implement `IJobSchedulerSeeder` and register it with `UseJobSchedulerSeeder<T>()`:
 
