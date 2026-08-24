@@ -7,7 +7,7 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <Version>1.0.0</Version>
+    <Version>10.0.1</Version>
     <PackageId>LoomKit.Jobs</PackageId>
     <Authors>Andrea Furlan</Authors>
     <Description>A background job scheduling library for .NET: enqueue jobs onto named queues, process them through consumers with an extensible middleware pipeline, and schedule one-shot, delayed, or recurring cron jobs.</Description>
