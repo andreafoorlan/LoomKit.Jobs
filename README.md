@@ -20,7 +20,18 @@ A background job scheduling library for .NET: jobs are placed on named **queues*
 ## Requirements
 
 - .NET 10 or later
-- Runtime dependencies: `Microsoft.Extensions.DependencyInjection.Abstractions`, `Microsoft.Extensions.Hosting.Abstractions`, `Microsoft.Extensions.Logging.Abstractions`, and [`Cronos`](https://github.com/HangfireIO/Cronos) for cron expression parsing
+- Depends on [`LoomKit.Jobs.Abstractions`](https://github.com/andreafoorlan/LoomKit.Jobs.Abstractions) (the interfaces, abstract base types, and models, in their own package) plus `Microsoft.Extensions.DependencyInjection.Abstractions`, `Microsoft.Extensions.Logging.Abstractions`, and [`Cronos`](https://github.com/HangfireIO/Cronos) for cron expression parsing
+
+## Architecture: split from `LoomKit.Jobs.Abstractions`
+
+The interfaces (`IJob`, `IJobHandler<,>`, `IJobQueue`, `IJobConsumer`, `IJobScheduler`, `IJobSchedulerSeeder`), the models every consumer touches (`JobSchedule`, `CronJobSchedule`, `JobStatus`), the scheduler event args, and the abstract base types (`JobMiddleware<,>`, `JobScheduler<>`, `JobSchedulerOptions(Builder)`, `JobQueueOptions(Builder)`, `JobConsumerOptions(Builder)`) live in the separate, lighter [`LoomKit.Jobs.Abstractions`](https://github.com/andreafoorlan/LoomKit.Jobs.Abstractions) package, which this package references. `LoomKit.Jobs` adds the concrete pieces on top: `DefaultJobScheduler`, `InProcessJobQueue`, `JobConsumer`, the DI registration helpers, cron scheduling extensions, the built-in retry/reschedule middlewares, and tracing.
+
+This means a project that only needs to *define* jobs/handlers — typically a domain/DDD class library that shouldn't know how jobs get queued or consumed — can depend on `LoomKit.Jobs.Abstractions` alone, keeping the concrete scheduler implementation confined to your application/composition-root layer:
+
+```bash
+dotnet add package LoomKit.Jobs.Abstractions   # domain layer: define IJob/IJobHandler and their JobStatus
+dotnet add package LoomKit.Jobs                # application layer: wire up the scheduler
+```
 
 ## Installation
 
@@ -30,7 +41,7 @@ A background job scheduling library for .NET: jobs are placed on named **queues*
 dotnet add package LoomKit.Jobs
 ```
 
-Available on [nuget.org](https://www.nuget.org/packages/LoomKit.Jobs) once the first tagged release (`v1.0.0`) has been published — a package version is published automatically for every `vX.Y.Z` tag pushed to this repo.
+Available on [nuget.org](https://www.nuget.org/packages/LoomKit.Jobs) — a package version is published automatically for every `vX.Y.Z` tag pushed to this repo.
 
 If you'd rather build against the source directly instead (e.g. to track `main`, or to debug/modify the library alongside your app), two options:
 
