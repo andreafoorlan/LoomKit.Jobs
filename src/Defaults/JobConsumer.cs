@@ -74,8 +74,21 @@ public class JobConsumer : IJobConsumer
             {
                 while (!_linkedCancellationTokenSource.Token.IsCancellationRequested)
                 {
-                    //
-                    var jobSchedule = await _jobQueue.AwaitForJobScheduleAsync(_jobConsumerOptions.JobConsumerName, _linkedCancellationTokenSource.Token);
+                    JobSchedule? jobSchedule;
+
+                    try
+                    {
+                        //
+                        jobSchedule = await _jobQueue.AwaitForJobScheduleAsync(_jobConsumerOptions.JobConsumerName, _linkedCancellationTokenSource.Token);
+                    }
+                    catch (OperationCanceledException)
+                        when (_linkedCancellationTokenSource.Token.IsCancellationRequested)
+                    {
+                        // stop requested while waiting for the next job: a queue that honours the
+                        // token by throwing (e.g. a database-backed one) is the normal way out of
+                        // the loop, not an error
+                        break;
+                    }
 
                     //
                     if (jobSchedule is null)
@@ -149,8 +162,9 @@ public class JobConsumer : IJobConsumer
         }
         catch (OperationCanceledException operationCanceledException)
         {
-            //
-            _logger.LogError(operationCanceledException, "[{jobConsumerName}] Operation canceled during StopAsync", _jobConsumerOptions.JobConsumerName);
+            // the consumer loop treats its own cancellation as a normal exit, so this is the caller's
+            // token cancelling the wait: shutdown was cut short, same as the timeout warning above
+            _logger.LogWarning(operationCanceledException, "[{jobConsumerName}] Stop was canceled before the consumer finished", _jobConsumerOptions.JobConsumerName);
         }
         catch (Exception exception)
         {
@@ -190,12 +204,14 @@ public class JobConsumer : IJobConsumer
 
         // create scope if requested in consumer options and ensure disposal
         IServiceProvider serviceProviderToUse = _serviceProvider;
-        IServiceScope? scope = null;
+        AsyncServiceScope? scope = null;
 
         if (_jobConsumerOptions.UseScopedServiceProvider)
         {
-            scope = _serviceProvider.CreateScope();
-            serviceProviderToUse = scope.ServiceProvider;
+            // async scope: a synchronous Dispose() throws for scoped services that only implement
+            // IAsyncDisposable (e.g. a pooled DbContext), and would skip their async cleanup
+            scope = _serviceProvider.CreateAsyncScope();
+            serviceProviderToUse = scope.Value.ServiceProvider;
         }
 
         try
@@ -215,7 +231,8 @@ public class JobConsumer : IJobConsumer
             _currentJobSchedule = null;
 
             // dispose scope if created
-            scope?.Dispose();
+            if (scope.HasValue)
+                await scope.Value.DisposeAsync();
         }
     }
 
